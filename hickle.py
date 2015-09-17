@@ -29,6 +29,13 @@ import numpy as np
 import h5py as h5
 from types import NoneType
 
+try:
+    import nsim
+    _have_nsim = True
+except ImportError:
+    _have_nsim = False
+
+
 __version__ = "1.1.1"
 __author__ = "Danny Price"
 
@@ -140,7 +147,6 @@ def dump_ndarray(obj, h5f, **kwargs):
     """ dumps an ndarray object to h5py file"""
     h5f.create_dataset('data', data=obj, **kwargs)
     h5f.create_dataset('type', data=['ndarray'])
-
 
 def dump_np_dtype(obj, h5f, **kwargs):
     """ dumps an np dtype object to h5py file"""
@@ -293,6 +299,15 @@ def dump_dict(obj, h5f='', **kwargs):
     hgroup = h5f.create_group('data')
     _dump_dict(obj, hgroup, **kwargs)
 
+def dump_timeseries(obj, h5f, **kwargs):
+    """ dumps an nsim.timeseries.Timeseries instance """
+    ds = h5f.create_dataset('data', data=obj, **kwargs)
+    h5f.create_dataset('type', data=['nsim.timeseries.Timeseries'])
+    h5f.create_dataset('tspan', data=obj.tspan)
+    subgroup = h5f.create_group('labels')
+    # use no_match() since _dump_list still breaks on some value types
+    no_match(obj.labels, subgroup, **kwargs)
+
 
 def no_match(obj, h5f, *args, **kwargs):
     """ If no match is made, raise an exception """
@@ -341,6 +356,8 @@ def dumper_lookup(obj):
         np.complex64: dump_np_dtype,
         np.complex128: dump_np_dtype,
     }
+    if _have_nsim:
+        types[nsim.timeseries.Timeseries] = dump_timeseries
 
     match = types.get(t, no_match)
     return match
@@ -420,6 +437,8 @@ def load(file, safe=True):
             data = np.ma.array(h5f["data"][:], mask=h5f["mask"][:])
         elif dtype == 'none':
             data = None
+        elif dtype == 'nsim.timeseries.Timeseries':
+            data = load_timeseries(h5f, safe)
         else:
             if dtype in ('string', 'unicode'):
                 data = h5f["data"][0]
@@ -545,3 +564,12 @@ def load_large(file):
 
     h5f = file_opener(file)
     return h5f
+
+def load_timeseries(group, safe):
+    try:
+        ar = group['data'][:]
+    except ValueError:
+        ar = group['data'] 
+    tspan = group['tspan'][:]
+    labels = load_pickle(group['labels'], safe)
+    return nsim.Timeseries(ar, tspan, labels)
