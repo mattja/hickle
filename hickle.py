@@ -431,6 +431,7 @@ def load(file, safe=True):
             types = {
                 'list': list,
                 'set': set,
+                'tuple': tuple,
                 'unicode': unicode,
                 'string': str,
                 'ndarray': load_ndarray,
