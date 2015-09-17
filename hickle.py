@@ -294,8 +294,26 @@ def dump_dict(obj, h5f='', **kwargs):
     _dump_dict(obj, hgroup, **kwargs)
 
 
+def dump_reduce(obj, hgroup, **kwargs):
+    """ dumps any object that implements __reduce__() """
+    r = obj.__reduce__()
+    if type(r) is str:
+        from sys import modules
+        mod = modules[obj.__module__]
+        dump(getattr(mod, r))
+    elif type(r) is type(()):
+        hgroup.create_dataset('type', data=['reduce'])
+        subgroup = hgroup.create_group('data')
+        dump_tuple(r, subgroup, **kwargs)
+    else:
+        raise NoMatchError
+
+
 def no_match(obj, h5f, *args, **kwargs):
-    """ If no match is made, raise an exception """
+    """ If no match is made, try __reduce__(), otherwise raise an exception """
+    if hasattr(obj, '__reduce__') and callable(obj.__reduce__):
+        dump_reduce(obj, h5f, **kwargs)
+
     try:
         import dill as cPickle
     except:
@@ -420,6 +438,9 @@ def load(file, safe=True):
             data = np.ma.array(h5f["data"][:], mask=h5f["mask"][:])
         elif dtype == 'none':
             data = None
+        elif dtype == 'reduce':
+            group = h5f["data"]
+            data = load_reduce(group, safe)
         else:
             if dtype in ('string', 'unicode'):
                 data = h5f["data"][0]
@@ -444,6 +465,24 @@ def load(file, safe=True):
         if 'h5f' in locals():
             h5f.close()
     return data
+
+
+def load_reduce(group, safe=True):
+    """ Load an object that was saved using the __reduce__() interface """
+    tup = load(group, safe)
+    callable, args = tup[0], tup[1]
+    obj = callable(args)
+    if len(tup) >= 3:
+        if hasattr(obj, '__setstate__') and callable(obj.__setstate__):
+            obj.__setstate__(tup[2])
+        else:
+            obj.__dict__.update(tup[2])
+    if len(tup) >= 4:
+        obj.extend(tup[3])
+    if len(tup) >= 5:
+        for key, value in tup[4].items():
+            obj[key] = value
+    return obj
 
 
 def load_pickle(h5f, safe=True):
