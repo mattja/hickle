@@ -28,6 +28,7 @@ import exceptions
 import numpy as np
 import h5py as h5
 from types import NoneType
+from sys import modules
 
 __version__ = "1.1.1"
 __author__ = "Danny Price"
@@ -141,6 +142,16 @@ def dump_ndarray(obj, h5f, **kwargs):
     h5f.create_dataset('data', data=obj, **kwargs)
     h5f.create_dataset('type', data=['ndarray'])
 
+def dump_ndarray_subclass(obj, h5f, **kwargs):
+    """ dumps an ndarray subclass instance, preserving any __dict__ """
+    ds = h5f.create_dataset('data', data=obj, **kwargs)
+    h5f.create_dataset('type', data=['ndarray_subclass'])
+    ds.attrs['module_name'] = obj.__module__
+    ds.attrs['class_name'] = obj.__class__.__name__
+    if hasattr(obj, '__dict__'):
+        subgroup = h5f.create_group('dict')
+        # use no_match() since _dump_dict still breaks on some value types
+        no_match(obj.__dict__, subgroup, **kwargs)
 
 def dump_np_dtype(obj, h5f, **kwargs):
     """ dumps an np dtype object to h5py file"""
@@ -343,6 +354,8 @@ def dumper_lookup(obj):
     }
 
     match = types.get(t, no_match)
+    if t is not np.ndarray and issubclass(t, np.ndarray):
+        match = dump_ndarray_subclass
     return match
 
 
@@ -410,6 +423,8 @@ def load(file, safe=True):
             data = load_dict(group)
         elif dtype == 'pickle':
             data = load_pickle(h5f, safe)
+        elif dtype == 'ndarray_subclass':
+            data = load_ndarray_subclass(h5f, safe)
         elif dtype == 'np_list':
             group = h5f["data"]
             data = load_np_list(group)
@@ -474,6 +489,19 @@ def load_pickle(h5f, safe=True):
         print "         for security reasons (it could be malicious code). If"
         print "         you wish to continue, manually set safe=False\n"
 
+
+def load_ndarray_subclass(group, safe):
+    ds = group["data"]
+    try:
+        ar = ds[:]
+    except ValueError:
+        ar = ds
+    mod = modules[ds.attrs['module_name']]
+    cls = getattr(mod, ds.attrs['class_name'])
+    data = cls(ar)
+    if 'dict' in group:
+        data.__dict__.update(load_pickle(group["dict"], safe))
+    return data
 
 def load_np_list(group):
     """ load a numpy list """
